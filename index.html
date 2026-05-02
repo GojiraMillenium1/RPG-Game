@@ -1,220 +1,339 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>RPG Game</title>
-<style>
-body { margin:0; overflow:hidden; background:black; }
-canvas { display:block; margin:auto; background:#000; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Chronicles of Index.html</title>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; background: #000; font-family: 'Courier New', monospace; }
+        #game-wrapper { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
+        canvas { background: #2d5e32; image-rendering: pixelated; }
+        
+        /* UI Overlay */
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .stats-bar { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7); color: gold; padding: 10px; border: 2px solid #fff; pointer-events: auto; }
+        
+        /* Battle Overlay */
+        #battle-overlay { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            background: #000; display: none; flex-direction: column; 
+            align-items: center; justify-content: center; z-index: 100; color: white;
+        }
 
-#battle {
-  position:absolute;
-  width:100%; height:100%;
-  background:rgba(0,0,0,0.9);
-  color:white;
-  display:none;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
-}
+        /* Dialogue Box */
+        #dialogue-box {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            width: 80%; height: 120px; background: rgba(0,0,50,0.9); border: 4px solid white;
+            color: white; padding: 20px; display: none; font-size: 1.2rem; pointer-events: auto;
+        }
 
-#ui {
-  position:absolute;
-  bottom:10px;
-  left:10px;
-  display:none;
-}
+        /* Mobile Controls */
+        #touch-controls { 
+            position: absolute; bottom: 30px; left: 30px; width: 150px; height: 150px; 
+            background: rgba(255,255,255,0.1); border-radius: 50%; display: none; touch-action: none; 
+        }
+        #joystick { 
+            position: absolute; width: 60px; height: 60px; background: rgba(255,255,255,0.5); 
+            border-radius: 50%; top: 45px; left: 45px; 
+        }
 
-.btn {
-  width:60px; height:60px;
-  background:#fff3;
-  margin:5px;
-  text-align:center;
-  line-height:60px;
-  border-radius:10px;
-  font-size:20px;
-}
-</style>
+        .btn { 
+            padding: 15px 25px; background: #fff; color: #000; border: none; 
+            cursor: pointer; font-weight: bold; margin: 10px; pointer-events: auto;
+        }
+        .btn:hover { background: #ccc; }
+        #log { margin-top: 20px; color: #0f0; }
+    </style>
 </head>
 <body>
 
-<canvas id="game" width="480" height="320"></canvas>
+<div id="game-wrapper">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui-layer">
+        <div class="stats-bar">
+            LVL: <span id="ui-lvl">1</span> | HP: <span id="ui-hp">100</span> | XP: <span id="ui-xp">0</span>
+        </div>
+        
+        <div id="dialogue-box">
+            <div id="dialogue-text"></div>
+            <div style="text-align:right; margin-top:10px;">[Click to Continue]</div>
+        </div>
 
-<div id="battle">
-  <h2 id="enemyName"></h2>
-  <p id="battleText"></p>
-  <button onclick="attack()">Attack</button>
-</div>
+        <div id="touch-controls"><div id="joystick"></div></div>
+    </div>
 
-<div id="ui">
-  <div class="btn" ontouchstart="move('up')" ontouchend="stop()">↑</div><br>
-  <div class="btn" ontouchstart="move('left')" ontouchend="stop()">←</div>
-  <div class="btn" ontouchstart="move('down')" ontouchend="stop()">↓</div>
-  <div class="btn" ontouchstart="move('right')" ontouchend="stop()">→</div>
+    <div id="battle-overlay">
+        <h2 id="battle-msg">A WILD SHADOW APPEARS!</h2>
+        <div style="display:flex; gap: 50px; margin: 40px;">
+            <div id="player-battle-side">🧙‍♂️ <br> HP: <span id="b-p-hp">100</span></div>
+            <div style="font-size: 2rem;">VS</div>
+            <div id="enemy-battle-side"><span id="enemy-sprite">👹</span> <br> HP: <span id="b-e-hp">50</span></div>
+        </div>
+        <div>
+            <button class="btn" onclick="game.battleAction('attack')">FIREBALL</button>
+            <button class="btn" onclick="game.battleAction('heal')">HEAL</button>
+            <button class="btn" onclick="game.battleAction('run')">RUN</button>
+        </div>
+        <div id="log"></div>
+    </div>
 </div>
 
 <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-
-// MOBILE DETECT
-if (/Mobi|Android/i.test(navigator.userAgent)) {
-  document.getElementById("ui").style.display = "block";
-}
-
-// LOAD IMAGES
-const img = {};
-function load(name, src){
-  img[name] = new Image();
-  img[name].src = src;
-}
-
-load("grass","https://i.imgur.com/2RXYO.png");
-load("tree","https://i.imgur.com/6RMhx.gif");
-load("house","https://i.imgur.com/5EOyTDQ.png");
-load("player","https://i.imgur.com/4LGAZ8t.png");
-
-// WORLD MAP (0 = grass, 1 = tree, 2 = house, 3 = tall grass)
-const map = [];
-for(let y=0;y<50;y++){
-  map[y]=[];
-  for(let x=0;x<50;x++){
-    let r = Math.random();
-    if(r<0.1) map[y][x]=1;
-    else if(r<0.15) map[y][x]=3;
-    else map[y][x]=0;
-  }
-}
-map[10][10]=2;
-
-// PLAYER
-let player = {
-  x:200,
-  y:150,
-  size:32,
-  hp:100
+/** * GAME CONFIG & ASSETS
+ * We use a "Canvas Sprite Sheet" approach.
+ **/
+const TILE_SIZE = 48;
+const MAP_SIZE = 50; // 50x50 tiles
+const SPRITES = {
+    player: '🧙‍♂️',
+    grass: '🌿',
+    tree: '🌲',
+    house: '🏠',
+    npc: '👵',
+    enemy: ['👹', '🐺', '👻', '🐍']
 };
 
-let camera = {x:0,y:0};
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.resize();
+        
+        this.player = {
+            x: 5 * TILE_SIZE, y: 5 * TILE_SIZE,
+            worldX: 5, worldY: 5,
+            hp: 100, maxHp: 100, lvl: 1, xp: 0,
+            inventory: [],
+            moving: false
+        };
 
-let keys = {};
-let dir = null;
-let inBattle = false;
-
-// INPUT
-document.addEventListener("keydown", e=>keys[e.key]=true);
-document.addEventListener("keyup", e=>keys[e.key]=false);
-
-function move(d){ dir=d; }
-function stop(){ dir=null; }
-
-// ENEMIES
-const enemies = [
-  {name:"Slime", hp:30},
-  {name:"Wolf", hp:50},
-  {name:"Goblin", hp:70}
-];
-
-let currentEnemy = null;
-
-// COLLISION
-function solid(tile){
-  return tile===1 || tile===2;
-}
-
-// UPDATE
-function update(){
-  if(inBattle) return;
-
-  let speed = 2;
-  let nx = player.x;
-  let ny = player.y;
-
-  if(keys["ArrowUp"]||dir==="up") ny-=speed;
-  if(keys["ArrowDown"]||dir==="down") ny+=speed;
-  if(keys["ArrowLeft"]||dir==="left") nx-=speed;
-  if(keys["ArrowRight"]||dir==="right") nx+=speed;
-
-  let tx = Math.floor(nx/32);
-  let ty = Math.floor(ny/32);
-
-  if(!solid(map[ty]?.[tx])){
-    player.x = nx;
-    player.y = ny;
-  }
-
-  // GRASS ENCOUNTER
-  if(map[ty]?.[tx]===3 && Math.random()<0.02){
-    startBattle();
-  }
-
-  camera.x = player.x - canvas.width/2;
-  camera.y = player.y - canvas.height/2;
-}
-
-// DRAW MAP
-function drawMap(){
-  for(let y=0;y<map.length;y++){
-    for(let x=0;x<map[y].length;x++){
-      let tile = map[y][x];
-      let px = x*32 - camera.x;
-      let py = y*32 - camera.y;
-
-      if(tile===0) ctx.drawImage(img.grass,px,py,32,32);
-      if(tile===1) ctx.drawImage(img.tree,px,py,32,32);
-      if(tile===2) ctx.drawImage(img.house,px,py,32,32);
-      if(tile===3){
-        ctx.drawImage(img.grass,px,py,32,32);
-        ctx.fillStyle="rgba(0,255,0,0.3)";
-        ctx.fillRect(px,py,32,32);
-      }
+        this.map = [];
+        this.entities = [];
+        this.state = 'EXPLORE'; // EXPLORE, BATTLE, DIALOGUE
+        this.keys = {};
+        this.touch = { active: false, x: 0, y: 0 };
+        
+        this.initMap();
+        this.setupListeners();
+        this.gameLoop();
     }
-  }
+
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+    }
+
+    initMap() {
+        for (let y = 0; y < MAP_SIZE; y++) {
+            this.map[y] = [];
+            for (let x = 0; x < MAP_SIZE; x++) {
+                // Default Grass
+                let type = 'grass';
+                // Random Trees
+                if (Math.random() > 0.85) type = 'tree';
+                // Boundary Walls
+                if (x === 0 || y === 0 || x === MAP_SIZE-1 || y === MAP_SIZE-1) type = 'tree';
+                
+                this.map[y][x] = type;
+            }
+        }
+        // Place a House and NPC
+        this.map[3][3] = 'house';
+        this.entities.push({ x: 3, y: 4, sprite: SPRITES.npc, name: 'Elder', dialog: "The dark shadow lurks in the tall grass. Level up to 5 to face the Demon King!" });
+    }
+
+    setupListeners() {
+        window.addEventListener('keydown', e => this.keys[e.code] = true);
+        window.addEventListener('keyup', e => this.keys[e.code] = false);
+        window.addEventListener('resize', () => this.resize());
+
+        // Mobile Joystick logic
+        const joyWrapper = document.getElementById('touch-controls');
+        const stick = document.getElementById('joystick');
+        if ('ontouchstart' in window) joyWrapper.style.display = 'block';
+
+        joyWrapper.addEventListener('touchstart', e => {
+            this.touch.active = true;
+            this.touch.startX = e.touches[0].clientX;
+            this.touch.startY = e.touches[0].clientY;
+        });
+
+        joyWrapper.addEventListener('touchmove', e => {
+            if (!this.touch.active) return;
+            const dx = e.touches[0].clientX - this.touch.startX;
+            const dy = e.touches[0].clientY - this.touch.startY;
+            const angle = Math.atan2(dy, dx);
+            const dist = Math.min(Math.sqrt(dx*dx + dy*dy), 40);
+            
+            stick.style.transform = `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px)`;
+            this.touch.dx = Math.cos(angle);
+            this.touch.dy = Math.sin(angle);
+        });
+
+        joyWrapper.addEventListener('touchend', () => {
+            this.touch.active = false;
+            stick.style.transform = `translate(0,0)`;
+            this.touch.dx = 0; this.touch.dy = 0;
+        });
+
+        // Close Dialogue
+        document.getElementById('dialogue-box').addEventListener('click', () => {
+            this.state = 'EXPLORE';
+            document.getElementById('dialogue-box').style.display = 'none';
+        });
+    }
+
+    update() {
+        if (this.state !== 'EXPLORE') return;
+
+        let nextX = this.player.x;
+        let nextY = this.player.y;
+        const speed = 4;
+
+        if (this.keys['ArrowUp'] || this.keys['KeyW'] || this.touch.dy < -0.5) nextY -= speed;
+        if (this.keys['ArrowDown'] || this.keys['KeyS'] || this.touch.dy > 0.5) nextY += speed;
+        if (this.keys['ArrowLeft'] || this.keys['KeyA'] || this.touch.dx < -0.5) nextX -= speed;
+        if (this.keys['ArrowRight'] || this.keys['KeyD'] || this.touch.dx > 0.5) nextX += speed;
+
+        // Collision & Bounds
+        const gridX = Math.floor((nextX + TILE_SIZE/2) / TILE_SIZE);
+        const gridY = Math.floor((nextY + TILE_SIZE/2) / TILE_SIZE);
+
+        if (this.map[gridY] && this.map[gridY][gridX] !== 'tree' && this.map[gridY][gridX] !== 'house') {
+            this.player.x = nextX;
+            this.player.y = nextY;
+            
+            // Check for NPC
+            this.entities.forEach(ent => {
+                if (gridX === ent.x && gridY === ent.y) {
+                    this.triggerDialogue(ent.dialog);
+                    this.player.y += 10; // Push back
+                }
+            });
+
+            // Random Encounter
+            if (nextX !== nextY && Math.random() < 0.005) {
+                this.startBattle();
+            }
+        }
+    }
+
+    draw() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+
+        // Camera Math
+        const camX = Math.floor(this.canvas.width / 2 - this.player.x);
+        const camY = Math.floor(this.canvas.height / 2 - this.player.y);
+
+        // Draw Map
+        for (let y = 0; y < MAP_SIZE; y++) {
+            for (let x = 0; x < MAP_SIZE; x++) {
+                const tx = x * TILE_SIZE + camX;
+                const ty = y * TILE_SIZE + camY;
+                
+                // Only draw what's on screen
+                if (tx > -TILE_SIZE && tx < this.canvas.width && ty > -TILE_SIZE && ty < this.canvas.height) {
+                    this.ctx.font = "30px Arial";
+                    this.ctx.fillText(SPRITES[this.map[y][x]] || '🌿', tx + 8, ty + 35);
+                }
+            }
+        }
+
+        // Draw Entities
+        this.entities.forEach(ent => {
+            this.ctx.fillText(ent.sprite, ent.x * TILE_SIZE + camX + 8, ent.y * TILE_SIZE + camY + 35);
+        });
+
+        // Draw Player
+        this.ctx.fillText(SPRITES.player, this.canvas.width/2 - 15, this.canvas.height/2 + 10);
+    }
+
+    triggerDialogue(text) {
+        this.state = 'DIALOGUE';
+        const box = document.getElementById('dialogue-box');
+        document.getElementById('dialogue-text').innerText = text;
+        box.style.display = 'block';
+    }
+
+    startBattle() {
+        this.state = 'BATTLE';
+        this.enemy = {
+            hp: 30 + (this.player.lvl * 20),
+            maxHp: 30 + (this.player.lvl * 20),
+            sprite: SPRITES.enemy[Math.floor(Math.random()*SPRITES.enemy.length)]
+        };
+        
+        document.getElementById('enemy-sprite').innerText = this.enemy.sprite;
+        document.getElementById('battle-overlay').style.display = 'flex';
+        this.updateBattleUI();
+        this.logBattle("A wild monster emerges!");
+    }
+
+    battleAction(type) {
+        if (this.state !== 'BATTLE') return;
+
+        if (type === 'attack') {
+            let dmg = 10 + (this.player.lvl * 5);
+            this.enemy.hp -= dmg;
+            this.logBattle(`You cast Fireball for ${dmg} damage!`);
+        } else if (type === 'heal') {
+            this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
+            this.logBattle(`You drank a potion! HP restored.`);
+        } else {
+            if (Math.random() > 0.5) { this.endBattle(); return; }
+            this.logBattle("Couldn't escape!");
+        }
+
+        if (this.enemy.hp <= 0) {
+            this.logBattle("VICTORY! +50 XP");
+            this.player.xp += 50;
+            if (this.player.xp >= this.player.lvl * 100) {
+                this.player.lvl++;
+                this.player.maxHp += 20;
+                this.player.hp = this.player.maxHp;
+                this.logBattle("LEVEL UP!");
+            }
+            setTimeout(() => this.endBattle(), 1200);
+        } else {
+            // Enemy Turn
+            setTimeout(() => {
+                let eDmg = 5 + (this.player.lvl * 2);
+                this.player.hp -= eDmg;
+                this.logBattle(`Enemy hits you for ${eDmg}!`);
+                this.updateBattleUI();
+                if (this.player.hp <= 0) alert("You died! Game Over.");
+            }, 600);
+        }
+        this.updateBattleUI();
+    }
+
+    updateBattleUI() {
+        document.getElementById('b-p-hp').innerText = this.player.hp;
+        document.getElementById('b-e-hp').innerText = this.enemy.hp;
+        document.getElementById('ui-hp').innerText = this.player.hp;
+        document.getElementById('ui-lvl').innerText = this.player.lvl;
+        document.getElementById('ui-xp').innerText = this.player.xp;
+    }
+
+    logBattle(txt) {
+        document.getElementById('log').innerText = txt;
+    }
+
+    endBattle() {
+        this.state = 'EXPLORE';
+        document.getElementById('battle-overlay').style.display = 'none';
+    }
+
+    gameLoop() {
+        this.update();
+        this.draw();
+        requestAnimationFrame(() => this.gameLoop());
+    }
 }
 
-// DRAW PLAYER
-function drawPlayer(){
-  ctx.drawImage(img.player, player.x-camera.x, player.y-camera.y,32,32);
-}
-
-// BATTLE
-function startBattle(){
-  inBattle=true;
-  currentEnemy = JSON.parse(JSON.stringify(
-    enemies[Math.floor(Math.random()*enemies.length)]
-  ));
-  document.getElementById("battle").style.display="flex";
-  document.getElementById("enemyName").innerText=currentEnemy.name;
-  document.getElementById("battleText").innerText="A wild "+currentEnemy.name+" appears!";
-}
-
-function attack(){
-  currentEnemy.hp -= 10;
-  if(currentEnemy.hp<=0){
-    document.getElementById("battleText").innerText="Enemy defeated!";
-    setTimeout(endBattle,1000);
-  } else {
-    player.hp -= 5;
-    document.getElementById("battleText").innerText=
-      "You hit! Enemy HP: "+currentEnemy.hp+" | Your HP: "+player.hp;
-  }
-}
-
-function endBattle(){
-  inBattle=false;
-  document.getElementById("battle").style.display="none";
-}
-
-// LOOP
-function loop(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  update();
-  drawMap();
-  drawPlayer();
-  requestAnimationFrame(loop);
-}
-loop();
-
+// Start Game
+const game = new Game();
 </script>
 </body>
 </html>
